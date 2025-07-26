@@ -52,7 +52,12 @@ export default function Projects() {
   const handleCreateProject = async () => {
     try {
       const user = await blink.auth.me()
+      
+      // Generate a unique ID for the project
+      const projectId = `proj_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      
       const projectData = {
+        id: projectId,
         name: newProject.name,
         description: newProject.description,
         client: newProject.client_name,
@@ -80,7 +85,9 @@ export default function Projects() {
       })
       
       setIsCreateDialogOpen(false)
-      loadProjects() // Refresh the list
+      
+      // Navigate to the newly created project
+      navigate(`/projects/${projectId}`)
     } catch (error) {
       console.error('Error creating project:', error)
     }
