@@ -13,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { blink } from '@/blink/client'
+import { supabase } from '@/lib/supabase'
 import { Project, Milestone, Resource, Task, ClientUpdate } from '@/types'
 import { format } from 'date-fns'
 
@@ -72,44 +73,114 @@ export default function ProjectDetails() {
       const user = await blink.auth.me()
       
       // Load project
-      const projectData = await blink.db.projects.list({
-        where: { AND: [{ userId: user.id }, { id }] }
-      })
+      const { data: projectData, error: projectError } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('id', id)
+        .single()
       
-      if (projectData.length === 0) {
+      if (projectError || !projectData) {
         navigate('/projects')
         return
       }
       
-      setProject(projectData[0])
+      // Transform project data
+      const transformedProject = {
+        id: projectData.id,
+        name: projectData.name,
+        description: projectData.description,
+        client: projectData.client,
+        location: projectData.location,
+        budget: projectData.budget || 0,
+        startDate: projectData.start_date,
+        endDate: projectData.end_date,
+        status: projectData.status,
+        userId: projectData.user_id,
+        createdAt: projectData.created_at
+      }
+      setProject(transformedProject)
 
       // Load milestones
-      const milestonesData = await blink.db.milestones.list({
-        where: { projectId: id },
-        orderBy: { dueDate: 'asc' }
-      })
-      setMilestones(milestonesData)
+      const { data: milestonesData } = await supabase
+        .from('milestones')
+        .select('*')
+        .eq('project_id', id)
+        .order('due_date', { ascending: true })
+      
+      const transformedMilestones = milestonesData?.map(milestone => ({
+        id: milestone.id,
+        projectId: milestone.project_id,
+        userId: milestone.user_id,
+        title: milestone.title,
+        description: milestone.description,
+        dueDate: milestone.due_date,
+        status: milestone.status,
+        createdAt: milestone.created_at
+      })) || []
+      setMilestones(transformedMilestones)
 
       // Load resources
-      const resourcesData = await blink.db.resources.list({
-        where: { projectId: id },
-        orderBy: { createdAt: 'desc' }
-      })
-      setResources(resourcesData)
+      const { data: resourcesData } = await supabase
+        .from('resources')
+        .select('*')
+        .eq('project_id', id)
+        .order('created_at', { ascending: false })
+      
+      const transformedResources = resourcesData?.map(resource => ({
+        id: resource.id,
+        projectId: resource.project_id,
+        userId: resource.user_id,
+        name: resource.name,
+        type: resource.type,
+        quantity: resource.quantity || 0,
+        unit: resource.unit,
+        cost: resource.cost || 0,
+        supplier: resource.supplier,
+        status: resource.status,
+        createdAt: resource.created_at
+      })) || []
+      setResources(transformedResources)
 
       // Load tasks
-      const tasksData = await blink.db.tasks.list({
-        where: { projectId: id },
-        orderBy: { createdAt: 'desc' }
-      })
-      setTasks(tasksData)
+      const { data: tasksData } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('project_id', id)
+        .order('created_at', { ascending: false })
+      
+      const transformedTasks = tasksData?.map(task => ({
+        id: task.id,
+        projectId: task.project_id,
+        milestoneId: task.milestone_id,
+        userId: task.user_id,
+        title: task.title,
+        description: task.description,
+        priority: task.priority,
+        status: task.status,
+        assignedTo: task.assigned_to,
+        dueDate: task.due_date,
+        createdAt: task.created_at
+      })) || []
+      setTasks(transformedTasks)
 
       // Load client updates
-      const updatesData = await blink.db.clientUpdates.list({
-        where: { projectId: id },
-        orderBy: { createdAt: 'desc' }
-      })
-      setClientUpdates(updatesData)
+      const { data: updatesData } = await supabase
+        .from('client_updates')
+        .select('*')
+        .eq('project_id', id)
+        .order('created_at', { ascending: false })
+      
+      const transformedUpdates = updatesData?.map(update => ({
+        id: update.id,
+        projectId: update.project_id,
+        userId: update.user_id,
+        type: update.type,
+        title: update.title,
+        message: update.message,
+        createdAt: update.created_at
+      })) || []
+      setClientUpdates(transformedUpdates)
 
     } catch (error) {
       console.error('Error loading project data:', error)
@@ -127,12 +198,18 @@ export default function ProjectDetails() {
   const createMilestone = async () => {
     try {
       const user = await blink.auth.me()
-      await blink.db.milestones.create({
-        ...milestoneForm,
-        projectId: id!,
-        userId: user.id,
-        createdAt: new Date().toISOString()
-      })
+      const { error } = await supabase
+        .from('milestones')
+        .insert([{
+          title: milestoneForm.title,
+          description: milestoneForm.description || null,
+          due_date: milestoneForm.dueDate || null,
+          status: milestoneForm.status,
+          project_id: id!,
+          user_id: user.id
+        }])
+      
+      if (error) throw error
       
       setMilestoneForm({ title: '', description: '', dueDate: '', status: 'pending' })
       setShowMilestoneDialog(false)
@@ -145,14 +222,20 @@ export default function ProjectDetails() {
   const createResource = async () => {
     try {
       const user = await blink.auth.me()
-      await blink.db.resources.create({
-        ...resourceForm,
-        projectId: id!,
-        userId: user.id,
-        quantity: parseInt(resourceForm.quantity),
-        cost: parseFloat(resourceForm.cost),
-        createdAt: new Date().toISOString()
-      })
+      const { error } = await supabase
+        .from('resources')
+        .insert([{
+          name: resourceForm.name,
+          type: resourceForm.type,
+          quantity: parseInt(resourceForm.quantity) || null,
+          cost: parseFloat(resourceForm.cost) || null,
+          supplier: resourceForm.supplier || null,
+          status: resourceForm.status,
+          project_id: id!,
+          user_id: user.id
+        }])
+      
+      if (error) throw error
       
       setResourceForm({ name: '', type: 'material', quantity: '', cost: '', supplier: '', status: 'ordered' })
       setShowResourceDialog(false)
@@ -165,13 +248,21 @@ export default function ProjectDetails() {
   const createTask = async () => {
     try {
       const user = await blink.auth.me()
-      await blink.db.tasks.create({
-        ...taskForm,
-        projectId: id!,
-        userId: user.id,
-        milestoneId: taskForm.milestoneId || null,
-        createdAt: new Date().toISOString()
-      })
+      const { error } = await supabase
+        .from('tasks')
+        .insert([{
+          title: taskForm.title,
+          description: taskForm.description || null,
+          assigned_to: taskForm.assignedTo || null,
+          due_date: taskForm.dueDate || null,
+          priority: taskForm.priority,
+          status: taskForm.status === 'todo' ? 'pending' : taskForm.status,
+          milestone_id: taskForm.milestoneId || null,
+          project_id: id!,
+          user_id: user.id
+        }])
+      
+      if (error) throw error
       
       setTaskForm({ title: '', description: '', assignedTo: '', dueDate: '', priority: 'medium', status: 'todo', milestoneId: '' })
       setShowTaskDialog(false)
@@ -184,12 +275,17 @@ export default function ProjectDetails() {
   const createClientUpdate = async () => {
     try {
       const user = await blink.auth.me()
-      await blink.db.clientUpdates.create({
-        ...updateForm,
-        projectId: id!,
-        userId: user.id,
-        createdAt: new Date().toISOString()
-      })
+      const { error } = await supabase
+        .from('client_updates')
+        .insert([{
+          title: updateForm.title,
+          message: updateForm.message,
+          type: updateForm.type,
+          project_id: id!,
+          user_id: user.id
+        }])
+      
+      if (error) throw error
       
       setUpdateForm({ title: '', message: '', type: 'progress' })
       setShowUpdateDialog(false)
@@ -200,9 +296,14 @@ export default function ProjectDetails() {
   }
 
   const toggleTaskStatus = async (taskId: string, currentStatus: string) => {
-    const newStatus = currentStatus === 'completed' ? 'todo' : 'completed'
+    const newStatus = currentStatus === 'completed' ? 'pending' : 'completed'
     try {
-      await blink.db.tasks.update(taskId, { status: newStatus })
+      const { error } = await supabase
+        .from('tasks')
+        .update({ status: newStatus })
+        .eq('id', taskId)
+      
+      if (error) throw error
       loadProjectData()
     } catch (error) {
       console.error('Error updating task:', error)

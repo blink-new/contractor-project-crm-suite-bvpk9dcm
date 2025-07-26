@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { blink } from '@/blink/client'
+import { supabase } from '@/lib/supabase'
 import { Project } from '@/types'
 import { format } from 'date-fns'
 
@@ -33,11 +34,30 @@ export default function Projects() {
   const loadProjects = async () => {
     try {
       const user = await blink.auth.me()
-      const projectsData = await blink.db.projects.list({
-        where: { userId: user.id },
-        orderBy: { createdAt: 'desc' }
-      })
-      setProjects(projectsData)
+      const { data: projectsData, error } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+      
+      if (error) throw error
+      
+      // Transform Supabase data to match our Project type
+      const transformedProjects = projectsData?.map(project => ({
+        id: project.id,
+        name: project.name,
+        description: project.description,
+        client: project.client,
+        location: project.location,
+        budget: project.budget || 0,
+        startDate: project.start_date,
+        endDate: project.end_date,
+        status: project.status,
+        userId: project.user_id,
+        createdAt: project.created_at
+      })) || []
+      
+      setProjects(transformedProjects)
     } catch (error) {
       console.error('Error loading projects:', error)
     } finally {
@@ -53,24 +73,25 @@ export default function Projects() {
     try {
       const user = await blink.auth.me()
       
-      // Generate a unique ID for the project
-      const projectId = `proj_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-      
       const projectData = {
-        id: projectId,
         name: newProject.name,
-        description: newProject.description,
+        description: newProject.description || null,
         client: newProject.client_name,
-        location: newProject.location,
-        budget: parseFloat(newProject.budget) || 0,
-        startDate: newProject.start_date,
-        endDate: newProject.end_date,
-        status: newProject.status,
-        userId: user.id,
-        createdAt: new Date().toISOString()
+        location: newProject.location || null,
+        budget: parseFloat(newProject.budget) || null,
+        start_date: newProject.start_date || null,
+        end_date: newProject.end_date || null,
+        status: newProject.status as 'planning' | 'in_progress' | 'completed' | 'on_hold',
+        user_id: user.id
       }
 
-      await blink.db.projects.create(projectData)
+      const { data, error } = await supabase
+        .from('projects')
+        .insert([projectData])
+        .select()
+        .single()
+      
+      if (error) throw error
       
       // Reset form
       setNewProject({
@@ -87,7 +108,7 @@ export default function Projects() {
       setIsCreateDialogOpen(false)
       
       // Navigate to the newly created project
-      navigate(`/projects/${projectId}`)
+      navigate(`/projects/${data.id}`)
     } catch (error) {
       console.error('Error creating project:', error)
     }
